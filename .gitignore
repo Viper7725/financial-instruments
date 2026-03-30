@@ -1,0 +1,14 @@
+# Runtime outputs and local bookkeeping
+输出结果/
+
+# Local analysis scratch files
+check-*/
+share-*.zip
+share-*-xlsx/
+
+# Office temp files
+~$*
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
