@@ -1354,11 +1354,17 @@ try {
         foreach ($refundOrder in $refundOrders.Values) {
             $hasNegativeShare = $shareStatement.NegativeAmountsByOrder.ContainsKey($refundOrder.OrderId)
             $positiveShare = if ($shareStatement.PositiveAmountsByOrder.ContainsKey($refundOrder.OrderId)) { [double]$shareStatement.PositiveAmountsByOrder[$refundOrder.OrderId] } else { 0.0 }
+            $hasTradeInSamePeriod = $tradeOrders.ContainsKey($refundOrder.OrderId)
             $canInfer = $false
             $reason = $null
             $inferredShareBase = 0.0
 
             if ($hasNegativeShare) {
+                continue
+            }
+
+            if ($hasTradeInSamePeriod -and $positiveShare -le 0.0) {
+                Add-Diagnostic -Diagnostics $diagnostics -Type (U '\u540C\u8BA2\u5355\u6536\u5165\u9000\u6B3E\u5E76\u5B58') -Status (U '\u4EE5\u8D26\u52A1\u660E\u7EC6\u4E3A\u51C6') -Game $refundOrder.Game -OrderId $refundOrder.OrderId -Amount 0.0 -Source $refundOrder.Source -Message (U '\u8BE5\u8BA2\u5355\u5728\u672C\u671F\u539F\u59CB\u8D26\u52A1\u660E\u7EC6\u4E2D\u540C\u65F6\u51FA\u73B0\u4E86\u6536\u5165\u548C\u9000\u6B3E\uff0C\u4F46\u5206\u6210\u660E\u7EC6\u8868\u672A\u627E\u5230\u540C\u8BA2\u5355\u7684\u6B63\u5206\u6210\u8BB0\u5F55\u3002\u4E3A\u907F\u514D\u4E0E\u8D26\u52A1\u660E\u7EC6\u51B2\u7A81\uff0C\u672C\u6B21\u4E0D\u518D\u6309\u5386\u53F2\u6837\u672C\u81EA\u52A8\u63A8\u7406\u8D1F\u5206\u6210\uff0C\u4EE5\u672C\u671F\u539F\u59CB\u8D26\u52A1\u660E\u7EC6\u4E3A\u51C6\u4FDD\u7559\u539F\u7ED3\u679C')
                 continue
             }
 
@@ -1437,12 +1443,27 @@ try {
 
         foreach ($tradeOrder in $tradeOrders.Values) {
             $hasPositiveShare = $shareStatement.PositiveAmountsByOrder.ContainsKey($tradeOrder.OrderId)
+            $negativeShare = if ($shareStatement.NegativeAmountsByOrder.ContainsKey($tradeOrder.OrderId)) { [math]::Abs([double]$shareStatement.NegativeAmountsByOrder[$tradeOrder.OrderId]) } else { 0.0 }
+            $hasRefundInSamePeriod = $refundOrders.ContainsKey($tradeOrder.OrderId)
             $canInfer = $false
             $reason = $null
             $inferredShareBase = 0.0
             $candidateAmounts = New-Object 'System.Collections.Generic.List[double]'
 
             if ($hasPositiveShare) {
+                continue
+            }
+
+            if ($hasRefundInSamePeriod -and $negativeShare -gt 0.0 -and $shareStatement.GamesByOrder.ContainsKey($tradeOrder.OrderId)) {
+                $gamesForOrder = $shareStatement.GamesByOrder[$tradeOrder.OrderId]
+                if ($gamesForOrder.Count -eq 1 -and $gamesForOrder.Contains($tradeOrder.Game)) {
+                    $canInfer = $true
+                    $inferredShareBase = [double]$negativeShare
+                    $reason = ('{0}{1}{2}' -f (U '\u540C\u8BA2\u5355\u5728\u5206\u6210\u660E\u7EC6\u8868\u4E2D\u5DF2\u5B58\u5728\u8D1F\u5206\u6210 '), $negativeShare.ToString('0.00'), (U '\uFF0C\u4F46\u7F3A\u5C11\u5BF9\u5E94\u7684\u6B63\u5206\u6210\u3002\u56E0\u539F\u59CB\u8D26\u52A1\u660E\u7EC6\u663E\u793A\u540C\u5355\u540C\u671F\u5148\u6536\u5165\u540E\u9000\u6B3E\uff0C\u5DF2\u6309\u540C\u8BA2\u5355\u8D1F\u5206\u6210\u53CD\u63A8\u8865\u5165\u6B63\u5206\u6210'))
+                }
+            }
+
+            if ($hasRefundInSamePeriod -and -not $canInfer -and $negativeShare -le 0.0) {
                 continue
             }
 

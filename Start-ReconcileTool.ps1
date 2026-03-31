@@ -28,12 +28,117 @@ if (-not (Test-Path -LiteralPath $cliScriptPath)) {
     exit 1
 }
 
+$bgColor = [System.Drawing.Color]::FromArgb(244, 247, 245)
+$cardColor = [System.Drawing.Color]::White
+$cardBorderColor = [System.Drawing.Color]::FromArgb(220, 228, 223)
+$primaryColor = [System.Drawing.Color]::FromArgb(24, 121, 92)
+$primarySoftColor = [System.Drawing.Color]::FromArgb(227, 243, 238)
+$dangerColor = [System.Drawing.Color]::FromArgb(191, 74, 62)
+$dangerSoftColor = [System.Drawing.Color]::FromArgb(250, 232, 228)
+$textColor = [System.Drawing.Color]::FromArgb(37, 49, 45)
+$mutedTextColor = [System.Drawing.Color]::FromArgb(100, 112, 108)
+$inputBackColor = [System.Drawing.Color]::FromArgb(251, 252, 251)
+
+function Set-PrimaryButtonStyle {
+    param(
+        [System.Windows.Forms.Button]$Button
+    )
+
+    $Button.BackColor = $primaryColor
+    $Button.ForeColor = [System.Drawing.Color]::White
+    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $Button.FlatAppearance.BorderSize = 0
+    $Button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(20, 103, 78)
+    $Button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(18, 92, 70)
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+}
+
+function Set-SecondaryButtonStyle {
+    param(
+        [System.Windows.Forms.Button]$Button
+    )
+
+    $Button.BackColor = [System.Drawing.Color]::White
+    $Button.ForeColor = $textColor
+    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $Button.FlatAppearance.BorderSize = 1
+    $Button.FlatAppearance.BorderColor = $cardBorderColor
+    $Button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(245, 248, 246)
+    $Button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(236, 242, 239)
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+}
+
+function Set-DangerButtonStyle {
+    param(
+        [System.Windows.Forms.Button]$Button
+    )
+
+    $Button.BackColor = $dangerColor
+    $Button.ForeColor = [System.Drawing.Color]::White
+    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $Button.FlatAppearance.BorderSize = 0
+    $Button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(171, 63, 51)
+    $Button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(156, 57, 47)
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+}
+
+function Set-TextBoxStyle {
+    param(
+        [System.Windows.Forms.TextBox]$TextBox
+    )
+
+    $TextBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $TextBox.BackColor = $inputBackColor
+    $TextBox.ForeColor = $textColor
+}
+
+function Set-CardStyle {
+    param(
+        [System.Windows.Forms.Panel]$Panel
+    )
+
+    $Panel.BackColor = $cardColor
+    $Panel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+}
+
+function Set-StatusTheme {
+    param(
+        [ValidateSet('idle', 'running', 'success', 'error', 'stopping')]
+        [string]$Theme
+    )
+
+    switch ($Theme) {
+        'running' {
+            $statusPanel.BackColor = $primarySoftColor
+            $statusLabel.ForeColor = $primaryColor
+        }
+        'success' {
+            $statusPanel.BackColor = $primarySoftColor
+            $statusLabel.ForeColor = $primaryColor
+        }
+        'error' {
+            $statusPanel.BackColor = $dangerSoftColor
+            $statusLabel.ForeColor = $dangerColor
+        }
+        'stopping' {
+            $statusPanel.BackColor = [System.Drawing.Color]::FromArgb(255, 243, 224)
+            $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(163, 95, 26)
+        }
+        default {
+            $statusPanel.BackColor = [System.Drawing.Color]::FromArgb(240, 245, 242)
+            $statusLabel.ForeColor = $mutedTextColor
+        }
+    }
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = U '\u6E38\u620F\u8D22\u52A1\u5BF9\u8D26\u5DE5\u5177'
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(860, 730)
-$form.MinimumSize = New-Object System.Drawing.Size(860, 730)
+$form.Size = New-Object System.Drawing.Size(920, 760)
+$form.MinimumSize = New-Object System.Drawing.Size(920, 760)
 $form.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9)
+$form.BackColor = $bgColor
+$form.MaximizeBox = $false
 
 $iconPath = Join-Path -Path $scriptRoot -ChildPath "Start-ReconcileTool.ico"
 if (Test-Path -LiteralPath $iconPath) {
@@ -44,22 +149,40 @@ if (Test-Path -LiteralPath $iconPath) {
     }
 }
 
+$headerPanel = New-Object System.Windows.Forms.Panel
+$headerPanel.Location = New-Object System.Drawing.Point(18, 16)
+$headerPanel.Size = New-Object System.Drawing.Size(868, 96)
+$headerPanel.BackColor = $primaryColor
+$form.Controls.Add($headerPanel)
+
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Text = U '\u672C\u5730\u5BF9\u8D26\u5DE5\u5177'
-$titleLabel.Location = New-Object System.Drawing.Point(20, 18)
-$titleLabel.Size = New-Object System.Drawing.Size(220, 28)
-$titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 15, [System.Drawing.FontStyle]::Bold)
-$form.Controls.Add($titleLabel)
+$titleLabel.Location = New-Object System.Drawing.Point(22, 18)
+$titleLabel.Size = New-Object System.Drawing.Size(260, 32)
+$titleLabel.ForeColor = [System.Drawing.Color]::White
+$titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 18, [System.Drawing.FontStyle]::Bold)
+$headerPanel.Controls.Add($titleLabel)
 
 $subtitleLabel = New-Object System.Windows.Forms.Label
-$subtitleLabel.Text = U '\u9009\u62E9\u539F\u59CB\u8D26\u5355\u548C\u5206\u6210\u660E\u7EC6\u8868\uFF0C\u7ED3\u679C\u9ED8\u8BA4\u4FDD\u5B58\u5230\u201C\u8F93\u51FA\u7ED3\u679C\u201D\u6587\u4EF6\u5939'
-$subtitleLabel.Location = New-Object System.Drawing.Point(22, 50)
-$subtitleLabel.Size = New-Object System.Drawing.Size(800, 24)
-$subtitleLabel.ForeColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$form.Controls.Add($subtitleLabel)
+$subtitleLabel.Text = U '\u9009\u62E9\u539F\u59CB\u8D26\u5355\u548C\u5206\u6210\u660E\u7EC6\u8868\uff0c\u7ED3\u679C\u4F1A\u81EA\u52A8\u6309\u6708\u4EFD\u5B58\u5165\u201C\u8F93\u51FA\u7ED3\u679C\u201D\u6587\u4EF6\u5939'
+$subtitleLabel.Location = New-Object System.Drawing.Point(24, 56)
+$subtitleLabel.Size = New-Object System.Drawing.Size(620, 22)
+$subtitleLabel.ForeColor = [System.Drawing.Color]::FromArgb(233, 245, 240)
+$headerPanel.Controls.Add($subtitleLabel)
+
+$headerTag = New-Object System.Windows.Forms.Label
+$headerTag.Text = U '\u672C\u5730\u8FD0\u884C'
+$headerTag.Location = New-Object System.Drawing.Point(748, 24)
+$headerTag.Size = New-Object System.Drawing.Size(92, 30)
+$headerTag.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$headerTag.BackColor = [System.Drawing.Color]::FromArgb(236, 246, 241)
+$headerTag.ForeColor = $primaryColor
+$headerTag.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9, [System.Drawing.FontStyle]::Bold)
+$headerPanel.Controls.Add($headerTag)
 
 function Add-FieldRow {
     param(
+        [System.Windows.Forms.Control]$Parent,
         [string]$LabelText,
         [int]$Top,
         [string]$ButtonText
@@ -67,21 +190,24 @@ function Add-FieldRow {
 
     $label = New-Object System.Windows.Forms.Label
     $label.Text = $LabelText
-    $label.Location = New-Object System.Drawing.Point(22, $Top)
-    $label.Size = New-Object System.Drawing.Size(130, 24)
-    $label.TextAlign = "MiddleLeft"
-    $form.Controls.Add($label)
+    $label.Location = New-Object System.Drawing.Point(18, $Top)
+    $label.Size = New-Object System.Drawing.Size(140, 24)
+    $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $label.ForeColor = $textColor
+    $Parent.Controls.Add($label)
 
     $textBox = New-Object System.Windows.Forms.TextBox
-    $textBox.Location = New-Object System.Drawing.Point(160, $Top)
-    $textBox.Size = New-Object System.Drawing.Size(560, 26)
-    $form.Controls.Add($textBox)
+    $textBox.Location = New-Object System.Drawing.Point(162, ($Top - 1))
+    $textBox.Size = New-Object System.Drawing.Size(540, 28)
+    Set-TextBoxStyle -TextBox $textBox
+    $Parent.Controls.Add($textBox)
 
     $button = New-Object System.Windows.Forms.Button
     $button.Text = $ButtonText
-    $button.Location = New-Object System.Drawing.Point(732, ($Top - 1))
-    $button.Size = New-Object System.Drawing.Size(90, 28)
-    $form.Controls.Add($button)
+    $button.Location = New-Object System.Drawing.Point(714, ($Top - 2))
+    $button.Size = New-Object System.Drawing.Size(92, 30)
+    Set-SecondaryButtonStyle -Button $button
+    $Parent.Controls.Add($button)
 
     return [pscustomobject]@{
         Label   = $label
@@ -90,57 +216,120 @@ function Add-FieldRow {
     }
 }
 
-$inputRow = Add-FieldRow -LabelText (U '\u539F\u59CB\u652F\u4ED8\u5B9D\u8D26\u5355') -Top 100 -ButtonText (U '\u9009\u62E9')
-$shareStatementRow = Add-FieldRow -LabelText (U '\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868') -Top 146 -ButtonText (U '\u9009\u62E9')
-$outputRow = Add-FieldRow -LabelText (U '\u5BF9\u8D26\u7ED3\u679C\u4FDD\u5B58\u4F4D\u7F6E') -Top 192 -ButtonText (U '\u53E6\u5B58\u4E3A')
+$fileCard = New-Object System.Windows.Forms.Panel
+$fileCard.Location = New-Object System.Drawing.Point(18, 126)
+$fileCard.Size = New-Object System.Drawing.Size(868, 218)
+Set-CardStyle -Panel $fileCard
+$form.Controls.Add($fileCard)
+
+$fileCardTitle = New-Object System.Windows.Forms.Label
+$fileCardTitle.Text = U '\u8D26\u5355\u6587\u4EF6'
+$fileCardTitle.Location = New-Object System.Drawing.Point(18, 16)
+$fileCardTitle.Size = New-Object System.Drawing.Size(180, 24)
+$fileCardTitle.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 11, [System.Drawing.FontStyle]::Bold)
+$fileCardTitle.ForeColor = $textColor
+$fileCard.Controls.Add($fileCardTitle)
+
+$fileCardIntro = New-Object System.Windows.Forms.Label
+$fileCardIntro.Text = U '\u652F\u6301 Excel \u548C zip \u81EA\u52A8\u89E3\u538B\uff0c\u4FDD\u6301\u73B0\u6709\u5BF9\u8D26\u903B\u8F91\u4E0D\u53D8\u3002'
+$fileCardIntro.Location = New-Object System.Drawing.Point(18, 42)
+$fileCardIntro.Size = New-Object System.Drawing.Size(500, 20)
+$fileCardIntro.ForeColor = $mutedTextColor
+$fileCard.Controls.Add($fileCardIntro)
+
+$inputRow = Add-FieldRow -Parent $fileCard -LabelText (U '\u539F\u59CB\u652F\u4ED8\u5B9D\u8D26\u5355') -Top 74 -ButtonText (U '\u9009\u62E9')
+$shareStatementRow = Add-FieldRow -Parent $fileCard -LabelText (U '\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868') -Top 116 -ButtonText (U '\u9009\u62E9')
+$outputRow = Add-FieldRow -Parent $fileCard -LabelText (U '\u5BF9\u8D26\u7ED3\u679C\u4FDD\u5B58\u4F4D\u7F6E') -Top 158 -ButtonText (U '\u53E6\u5B58\u4E3A')
 
 $hintLabel = New-Object System.Windows.Forms.Label
-$hintLabel.Text = U '\u5206\u6210\u4EE5\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868\u4E3A\u51C6\uFF1B\u82E5\u53D1\u73B0\u201C\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE\u201D\uFF0C\u5DE5\u5177\u4F1A\u5728\u201C\u63A8\u7406\u610F\u89C1\u201Dsheet\u7ED9\u51FA\u53C2\u8003\u7ED3\u679C\uFF0C\u5E76\u53EF\u53C2\u8003\u201C\u8F93\u51FA\u7ED3\u679C\u201D\u4E2D\u7684\u5386\u53F2\u660E\u7EC6\uFF1B\u4E24\u4EFD\u539F\u59CB\u8868\u90FD\u652F\u6301 zip \u81EA\u52A8\u89E3\u538B'
-$hintLabel.Location = New-Object System.Drawing.Point(160, 238)
-$hintLabel.Size = New-Object System.Drawing.Size(640, 42)
-$hintLabel.ForeColor = [System.Drawing.Color]::FromArgb(95, 95, 95)
-$form.Controls.Add($hintLabel)
+$hintLabel.Text = U '\u5206\u6210\u4EE5\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868\u4E3A\u51C6\uff1B\u8F93\u51FA\u7ED3\u679C\u4F1A\u9ED8\u8BA4\u6309\u6708\u4EFD\u5F52\u6863\u3002'
+$hintLabel.Location = New-Object System.Drawing.Point(18, 190)
+$hintLabel.Size = New-Object System.Drawing.Size(600, 18)
+$hintLabel.ForeColor = $mutedTextColor
+$fileCard.Controls.Add($hintLabel)
+
+$actionCard = New-Object System.Windows.Forms.Panel
+$actionCard.Location = New-Object System.Drawing.Point(18, 358)
+$actionCard.Size = New-Object System.Drawing.Size(868, 100)
+Set-CardStyle -Panel $actionCard
+$form.Controls.Add($actionCard)
 
 $openAfterRun = New-Object System.Windows.Forms.CheckBox
 $openAfterRun.Text = U '\u5B8C\u6210\u540E\u81EA\u52A8\u6253\u5F00\u7ED3\u679C\u6587\u4EF6'
-$openAfterRun.Location = New-Object System.Drawing.Point(160, 290)
-$openAfterRun.Size = New-Object System.Drawing.Size(250, 28)
+$openAfterRun.Location = New-Object System.Drawing.Point(18, 16)
+$openAfterRun.Size = New-Object System.Drawing.Size(240, 24)
 $openAfterRun.Checked = $true
-$form.Controls.Add($openAfterRun)
+$openAfterRun.ForeColor = $textColor
+$actionCard.Controls.Add($openAfterRun)
 
 $runButton = New-Object System.Windows.Forms.Button
 $runButton.Text = U '\u5F00\u59CB\u5BF9\u8D26'
-$runButton.Location = New-Object System.Drawing.Point(22, 330)
-$runButton.Size = New-Object System.Drawing.Size(120, 36)
-$runButton.BackColor = [System.Drawing.Color]::FromArgb(16, 124, 65)
-$runButton.ForeColor = [System.Drawing.Color]::White
-$runButton.FlatStyle = "Flat"
-$form.Controls.Add($runButton)
+$runButton.Location = New-Object System.Drawing.Point(18, 50)
+$runButton.Size = New-Object System.Drawing.Size(126, 34)
+Set-PrimaryButtonStyle -Button $runButton
+$actionCard.Controls.Add($runButton)
 
 $stopButton = New-Object System.Windows.Forms.Button
 $stopButton.Text = U '\u505C\u6B62\u5904\u7406'
-$stopButton.Location = New-Object System.Drawing.Point(156, 330)
-$stopButton.Size = New-Object System.Drawing.Size(120, 36)
-$stopButton.BackColor = [System.Drawing.Color]::FromArgb(196, 64, 44)
-$stopButton.ForeColor = [System.Drawing.Color]::White
-$stopButton.FlatStyle = "Flat"
-$form.Controls.Add($stopButton)
+$stopButton.Location = New-Object System.Drawing.Point(156, 50)
+$stopButton.Size = New-Object System.Drawing.Size(126, 34)
+Set-DangerButtonStyle -Button $stopButton
+$actionCard.Controls.Add($stopButton)
+
+$statusPanel = New-Object System.Windows.Forms.Panel
+$statusPanel.Location = New-Object System.Drawing.Point(304, 18)
+$statusPanel.Size = New-Object System.Drawing.Size(540, 58)
+$statusPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$actionCard.Controls.Add($statusPanel)
+
+$statusCaption = New-Object System.Windows.Forms.Label
+$statusCaption.Text = U '\u5F53\u524D\u72B6\u6001'
+$statusCaption.Location = New-Object System.Drawing.Point(16, 9)
+$statusCaption.Size = New-Object System.Drawing.Size(90, 18)
+$statusCaption.ForeColor = $mutedTextColor
+$statusPanel.Controls.Add($statusCaption)
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = U '\u5C31\u7EEA'
-$statusLabel.Location = New-Object System.Drawing.Point(292, 337)
-$statusLabel.Size = New-Object System.Drawing.Size(390, 24)
-$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$form.Controls.Add($statusLabel)
+$statusLabel.Location = New-Object System.Drawing.Point(16, 27)
+$statusLabel.Size = New-Object System.Drawing.Size(500, 22)
+$statusLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold)
+$statusPanel.Controls.Add($statusLabel)
+
+$logCard = New-Object System.Windows.Forms.Panel
+$logCard.Location = New-Object System.Drawing.Point(18, 472)
+$logCard.Size = New-Object System.Drawing.Size(868, 236)
+Set-CardStyle -Panel $logCard
+$form.Controls.Add($logCard)
+
+$logTitle = New-Object System.Windows.Forms.Label
+$logTitle.Text = U '\u8FD0\u884C\u65E5\u5FD7'
+$logTitle.Location = New-Object System.Drawing.Point(18, 14)
+$logTitle.Size = New-Object System.Drawing.Size(140, 22)
+$logTitle.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 11, [System.Drawing.FontStyle]::Bold)
+$logTitle.ForeColor = $textColor
+$logCard.Controls.Add($logTitle)
+
+$logSubtitle = New-Object System.Windows.Forms.Label
+$logSubtitle.Text = U '\u8FD9\u91CC\u4F1A\u8BB0\u5F55\u672C\u6B21\u5BF9\u8D26\u7684\u5173\u952E\u8FDB\u5EA6\u548C\u5F02\u5E38\u4FE1\u606F\u3002'
+$logSubtitle.Location = New-Object System.Drawing.Point(18, 38)
+$logSubtitle.Size = New-Object System.Drawing.Size(420, 18)
+$logSubtitle.ForeColor = $mutedTextColor
+$logCard.Controls.Add($logSubtitle)
 
 $logBox = New-Object System.Windows.Forms.TextBox
-$logBox.Location = New-Object System.Drawing.Point(22, 385)
-$logBox.Size = New-Object System.Drawing.Size(800, 290)
+$logBox.Location = New-Object System.Drawing.Point(18, 66)
+$logBox.Size = New-Object System.Drawing.Size(830, 150)
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.BackColor = [System.Drawing.Color]::FromArgb(248, 248, 248)
-$form.Controls.Add($logBox)
+$logBox.BackColor = [System.Drawing.Color]::FromArgb(249, 251, 250)
+$logBox.ForeColor = $textColor
+$logBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9)
+$logCard.Controls.Add($logBox)
+
+Set-StatusTheme -Theme 'idle'
 
 function Append-Log {
     param(
@@ -193,6 +382,7 @@ function Request-StopProcess {
 
     $script:stopRequested = $true
     $statusLabel.Text = U '\u6B63\u5728\u505C\u6B62\uff0C\u8BF7\u7A0D\u5019...'
+    Set-StatusTheme -Theme 'stopping'
     Append-Log (U '\u6B63\u5728\u624B\u52A8\u505C\u6B62\u5F53\u524D\u5BF9\u8D26\u4EFB\u52A1...')
     Stop-RunningProcess
 }
@@ -569,6 +759,9 @@ function Update-RunButtonState {
     $inputRow.Button.Enabled = $true
     $outputRow.Button.Enabled = $true
     $shareStatementRow.Button.Enabled = $true
+    if (-not $script:stopRequested) {
+        Set-StatusTheme -Theme 'idle'
+    }
 }
 
 $inputDialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -716,6 +909,7 @@ $runButton.Add_Click({
     $script:stopRequested = $false
     Update-RunButtonState
     $statusLabel.Text = U '\u6B63\u5728\u5904\u7406\uff0C\u8BF7\u7A0D\u5019...'
+    Set-StatusTheme -Theme 'running'
     Append-Log ((U '\u5F00\u59CB\u5904\u7406') + " " + $inputPath)
     if (-not [string]::IsNullOrWhiteSpace($shareStatementPath)) {
         Append-Log ((U '\u5206\u6210\u5C06\u4F7F\u7528\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868') + " " + $shareStatementPath)
@@ -752,6 +946,7 @@ $runButton.Add_Click({
 
         if ($result.Canceled) {
             $statusLabel.Text = U '\u5DF2\u624B\u52A8\u505C\u6B62'
+            Set-StatusTheme -Theme 'idle'
             [System.Windows.Forms.MessageBox]::Show(
                 (U '\u5DF2\u624B\u52A8\u505C\u6B62\u5F53\u524D\u5BF9\u8D26\u4EFB\u52A1'),
                 $form.Text,
@@ -761,6 +956,7 @@ $runButton.Add_Click({
         }
         elseif ($result.ExitCode -eq 0) {
             $statusLabel.Text = U '\u5BF9\u8D26\u5B8C\u6210'
+            Set-StatusTheme -Theme 'success'
             if ($result.OpenFile -and (Test-Path -LiteralPath $result.Output)) {
                 Start-Process -FilePath $result.Output | Out-Null
             }
@@ -773,6 +969,7 @@ $runButton.Add_Click({
         }
         else {
             $statusLabel.Text = U '\u8FD0\u884C\u5931\u8D25'
+            Set-StatusTheme -Theme 'error'
             $failureMessage = Normalize-UserFacingErrorMessage -Message (Get-ProcessFailureMessage -Result $result)
             Append-Log $failureMessage
             [System.Windows.Forms.MessageBox]::Show(
@@ -785,6 +982,7 @@ $runButton.Add_Click({
     }
     catch {
         $statusLabel.Text = U '\u8FD0\u884C\u5931\u8D25'
+        Set-StatusTheme -Theme 'error'
         $failureMessage = Normalize-UserFacingErrorMessage -Message $_.Exception.Message
         Append-Log $failureMessage
         [System.Windows.Forms.MessageBox]::Show(
@@ -814,6 +1012,7 @@ $form.Add_FormClosing({
         Request-StopProcess
         $script:isRunning = $false
         $statusLabel.Text = U '\u5DF2\u505C\u6B62'
+        Set-StatusTheme -Theme 'idle'
         Update-RunButtonState
     }
 })
