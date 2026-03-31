@@ -1,8 +1,8 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$InputPath,
 
-    [string]$OutputPath = (Join-Path -Path (Get-Location) -ChildPath "对账结果.xlsx"),
+    [string]$OutputPath = (Join-Path -Path (Get-Location) -ChildPath 'reconcile.xlsx'),
 
     [string]$ShareStatementPath
 )
@@ -10,6 +10,15 @@ param(
 Set-StrictMode -Version 3
 $ErrorActionPreference = "Stop"
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+try {
+    $utf8Encoding = New-Object System.Text.UTF8Encoding($false)
+    [Console]::InputEncoding = $utf8Encoding
+    [Console]::OutputEncoding = $utf8Encoding
+    $OutputEncoding = $utf8Encoding
+}
+catch {
+}
 
 $ProductPattern = '^(.*?)(\d+(?:\.\d+)?)\u5143(?:\u6E38\u620F)?\u793C\u5305$'
 $TradeIncomePrefix = '0010001|'
@@ -25,11 +34,133 @@ function U {
     return [regex]::Unescape($EscapedText)
 }
 
+function Get-ReadableExceptionDetail {
+    param(
+        [System.Exception]$Exception
+    )
+
+    if ($null -eq $Exception -or [string]::IsNullOrWhiteSpace($Exception.Message)) {
+        return $null
+    }
+
+    $message = $Exception.Message.Trim()
+    if ($message -match 'HRESULT|COM|0x800A03EC|RPC_E_SERVERCALL_RETRYLATER') {
+        return $null
+    }
+
+    return $message
+}
+
+function Get-FriendlyExcelOperationMessage {
+    param(
+        [string]$Operation,
+        [string]$Path,
+        [System.Exception]$Exception
+    )
+
+    $pathSuffix = if ([string]::IsNullOrWhiteSpace($Path)) { '' } else { ' ' + (U '\u6587\u4EF6') + ': ' + $Path }
+    $detail = Get-ReadableExceptionDetail -Exception $Exception
+    $detailSuffix = if ([string]::IsNullOrWhiteSpace($detail)) { '' } else { ' ' + (U '\u8BE6\u7EC6\u4FE1\u606F') + ': ' + $detail }
+
+    switch ($Operation) {
+        'CreateExcelApplication' {
+            return (U '\u65E0\u6CD5\u542F\u52A8 Excel\u3002\u8BF7\u786E\u8BA4\u672C\u673A\u5DF2\u5B89\u88C5 Microsoft Excel\uff0c\u5E76\u5148\u5173\u95ED\u5DF2\u5361\u4F4F\u7684 Excel \u8FDB\u7A0B\u540E\u91CD\u8BD5\u3002') + $detailSuffix
+        }
+        'OpenInputWorkbook' {
+            return (U '\u65E0\u6CD5\u6253\u5F00\u539F\u59CB\u652F\u4ED8\u5B9D\u8D26\u5355\u3002\u8BF7\u5148\u5173\u95ED\u8BE5\u6587\u4EF6\u548C\u6240\u6709 Excel \u7A97\u53E3\u540E\u91CD\u8BD5\uff1B\u5982\u679C\u6587\u4EF6\u521A\u4ECE\u538B\u7F29\u5305\u89E3\u51FA\uff0C\u4E5F\u53EF\u4EE5\u5148\u624B\u52A8\u7528 Excel \u6253\u5F00\u4E00\u6B21\uff0C\u786E\u8BA4\u6CA1\u6709\u4FEE\u590D\u6216\u4FDD\u62A4\u63D0\u793A\u3002') + $pathSuffix + $detailSuffix
+        }
+        'OpenShareWorkbook' {
+            return (U '\u65E0\u6CD5\u6253\u5F00\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868\u3002\u8BF7\u5148\u5173\u95ED\u8BE5\u6587\u4EF6\u548C\u6240\u6709 Excel \u7A97\u53E3\u540E\u91CD\u8BD5\uff0C\u5E76\u786E\u8BA4\u8BE5\u6587\u4EF6\u80FD\u591F\u88AB Excel \u6B63\u5E38\u6253\u5F00\u3002') + $pathSuffix + $detailSuffix
+        }
+        'OpenHistoricalWorkbook' {
+            return (U '\u65E0\u6CD5\u6253\u5F00\u5386\u53F2\u5BF9\u8D26\u53C2\u8003\u6587\u4EF6') + $pathSuffix + $detailSuffix
+        }
+        'SaveWorkbook' {
+            return (U '\u65E0\u6CD5\u4FDD\u5B58\u5BF9\u8D26\u7ED3\u679C\u3002\u8BF7\u786E\u8BA4\u76EE\u6807\u6587\u4EF6\u6CA1\u6709\u88AB Excel \u6216\u5176\u4ED6\u7A0B\u5E8F\u5360\u7528\uff0C\u4E14\u4FDD\u5B58\u76EE\u5F55\u5177\u6709\u5199\u5165\u6743\u9650\u3002') + $pathSuffix + $detailSuffix
+        }
+        default {
+            return (U '\u5BF9\u8D26\u5904\u7406\u5931\u8D25\uff0C\u8BF7\u68C0\u67E5 Excel \u6587\u4EF6\u662F\u5426\u53EF\u4EE5\u6B63\u5E38\u6253\u5F00\u3002') + $pathSuffix + $detailSuffix
+        }
+    }
+}
+
+function Open-WorkbookSafely {
+    param(
+        $ExcelApp,
+        [string]$Path,
+        [string]$Operation
+    )
+
+    $lastException = $null
+    foreach ($attempt in 1..2) {
+        try {
+            return $ExcelApp.Workbooks.Open($Path, 0, $true)
+        }
+        catch {
+            $lastException = $_.Exception
+            if ($attempt -lt 2) {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
+
+    throw (Get-FriendlyExcelOperationMessage -Operation $Operation -Path $Path -Exception $lastException)
+}
+
+function Save-WorkbookSafely {
+    param(
+        $Workbook,
+        [string]$OutputPath
+    )
+
+    $directory = Split-Path -Parent $OutputPath
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+
+    $lastException = $null
+    foreach ($attempt in 1..2) {
+        try {
+            $Workbook.SaveAs($OutputPath, 51)
+            return
+        }
+        catch {
+            $lastException = $_.Exception
+            if ($attempt -lt 2) {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
+
+    throw (Get-FriendlyExcelOperationMessage -Operation 'SaveWorkbook' -Path $OutputPath -Exception $lastException)
+}
+
+trap {
+    $message = $null
+    if ($null -ne $_ -and $null -ne $_.Exception) {
+        $message = Get-ReadableExceptionDetail -Exception $_.Exception
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = Get-FriendlyExcelOperationMessage -Operation 'Generic' -Path $null -Exception $_.Exception
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        $message = U '\u5BF9\u8D26\u5904\u7406\u5931\u8D25\uff0C\u8BF7\u68C0\u67E5\u4E0A\u4F20\u7684\u6587\u4EF6\u662F\u5426\u6B63\u786E\u3002'
+    }
+
+    Write-Output ("ERROR: " + $message)
+    exit 1
+}
+
 $HistoricalOutputRoot = Join-Path -Path $ScriptRoot -ChildPath (U '\u8F93\u51FA\u7ED3\u679C')
 
 $OtherCategoryLabel = U '\u5176\u4ED6'
 $TransferToWangshangLabel = U '\u8F6C\u51FA\u5230\u7F51\u5546\u94F6\u884C'
 $TransferToWangshangKeyword = U '\u8F6C\u51FA\u5230\u7F51\u5546\u94F6\u884C'
+$CommissionRemarkKeyword = U '\u5929\u732B\u4F63\u91D1'
+$BaseSoftwareFeeRemarkKeyword = U '\u57FA\u7840\u8F6F\u4EF6\u670D\u52A1\u8D39'
+$CategorySystemKeyword = U '\u7C7B\u76EE\u7CFB\u7EDF'
+$DeductKeyword = U '\u6263\u6B3E'
 
 function Normalize-GameName {
     param(
@@ -41,7 +172,7 @@ function Normalize-GameName {
     }
 
     $normalized = $GameName.Trim()
-    $normalized = [regex]::Replace($normalized, '(?:\s*[\(\[]?(?:test|TEST|测试)\s*\d+(?:\.\d+)*[\)\]]?)$', '')
+    $normalized = [regex]::Replace($normalized, '(?:\s*[\(\[]?(?:test|TEST|娴嬭瘯)\s*\d+(?:\.\d+)*[\)\]]?)$', '')
     $testKeyword = [regex]::Escape((U '\u6D4B\u8BD5'))
     $normalized = [regex]::Replace($normalized, ("(?:\s*[\(\[]?(?:test|TEST|{0})\s*\d+(?:\.\d+)*[\)\]]?)$" -f $testKeyword), '')
     $normalized = [regex]::Replace($normalized, '\s+', ' ')
@@ -90,6 +221,127 @@ function Get-ProductInfo {
         Game  = Normalize-GameName -GameName $trimmed
         Price = $null
     }
+}
+
+function Get-OrderIdFromRemark {
+    param(
+        [string]$Remark
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Remark)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Remark, '\{(?<OrderId>\d{10,})\}')
+    if ($match.Success) {
+        return $match.Groups['OrderId'].Value
+    }
+
+    $match = [regex]::Match($Remark, '[\(\uFF08](?<OrderId>\d{10,})[\)\uFF09]')
+    if ($match.Success) {
+        return $match.Groups['OrderId'].Value
+    }
+
+    return $null
+}
+
+function Test-IsRemarkDerivedFee {
+    param(
+        [string]$BusinessDesc,
+        [string]$Remark,
+        [string]$RemarkOrderId
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($BusinessDesc)) {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Remark) -or [string]::IsNullOrWhiteSpace($RemarkOrderId)) {
+        return $false
+    }
+
+    return (
+        $Remark.Contains($CommissionRemarkKeyword) -and
+        $Remark.Contains($CategorySystemKeyword) -and
+        $Remark.Contains($DeductKeyword)
+    )
+}
+
+function Test-IsRemarkDerivedBaseFee {
+    param(
+        [string]$BusinessDesc,
+        [string]$Remark
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($BusinessDesc)) {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Remark)) {
+        return $false
+    }
+
+    return (
+        $Remark.Contains($BaseSoftwareFeeRemarkKeyword) -and
+        $Remark.Contains($DeductKeyword)
+    )
+}
+
+function Get-ServiceFeeHourBucketFromRemark {
+    param(
+        [string]$Remark
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Remark)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Remark, '\{(?<Bucket>\d{10})\}')
+    if ($match.Success) {
+        return $match.Groups['Bucket'].Value
+    }
+
+    return $null
+}
+
+function Get-TimeHourBucket {
+    param(
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Text.Trim(), '^(?<Year>\d{4})[-/](?<Month>\d{1,2})[-/](?<Day>\d{1,2})\s+(?<Hour>\d{1,2})')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    return ('{0}{1:D2}{2:D2}{3:D2}' -f [int]$match.Groups['Year'].Value, [int]$match.Groups['Month'].Value, [int]$match.Groups['Day'].Value, [int]$match.Groups['Hour'].Value)
+}
+
+function Add-BucketAmount {
+    param(
+        [hashtable]$BucketAmounts,
+        [string]$Bucket,
+        [double]$Amount
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Bucket) -or [math]::Abs($Amount) -lt 0.000001) {
+        return
+    }
+
+    if (-not $BucketAmounts.ContainsKey($Bucket)) {
+        $BucketAmounts[$Bucket] = @{}
+    }
+
+    $amountKey = ('{0:F2}' -f [double]$Amount)
+    if (-not $BucketAmounts[$Bucket].ContainsKey($amountKey)) {
+        $BucketAmounts[$Bucket][$amountKey] = 0
+    }
+
+    $BucketAmounts[$Bucket][$amountKey] += 1
 }
 
 function Resolve-UploadPath {
@@ -149,9 +401,9 @@ function Resolve-UploadPath {
     $selected = $candidates | Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false } | Select-Object -First 1
 
     $notice = if ($candidates.Count -gt 1) {
-        "Archive contains multiple candidates for {0}. Using largest file: {1}" -f $Label, $selected.FullName
+        "{0}压缩包中存在多个候选文件，已自动使用体积最大的文件：{1}" -f $Label, $selected.FullName
     } else {
-        "Extracted {0} from zip: {1}" -f $Label, $selected.FullName
+        "已从压缩包中解压{0}：{1}" -f $Label, $selected.FullName
     }
 
     return [pscustomobject]@{
@@ -216,6 +468,8 @@ function Load-ShareStatementSummary {
         NegativeAmountsByOrder = @{}
         GamesByOrder = @{}
         PositiveAmountsByGamePrice = @{}
+        MatchedWorksheetCount = 0
+        MatchedRowCount = 0
     }
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -223,12 +477,12 @@ function Load-ShareStatementSummary {
     }
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        throw "Share statement not found: $Path"
+        throw "财务分成明细表文件不存在：$Path"
     }
 
     $shareWorkbook = $null
     try {
-        $shareWorkbook = $ExcelApp.Workbooks.Open($Path, 0, $true)
+        $shareWorkbook = Open-WorkbookSafely -ExcelApp $ExcelApp -Path $Path -Operation 'OpenShareWorkbook'
 
         foreach ($worksheet in $shareWorkbook.Worksheets) {
             $usedRange = $worksheet.UsedRange
@@ -252,6 +506,8 @@ function Load-ShareStatementSummary {
                 if (-not $headerMap.ContainsKey((U '\u5546\u54C1\u540D\u79F0')) -or -not $headerMap.ContainsKey((U '\u6263\u8D39\u91D1\u989D'))) {
                     continue
                 }
+
+                $result.MatchedWorksheetCount += 1
 
                 $productColumn = $headerMap[(U '\u5546\u54C1\u540D\u79F0')]
                 $shareAmountColumn = $headerMap[(U '\u6263\u8D39\u91D1\u989D')]
@@ -281,6 +537,7 @@ function Load-ShareStatementSummary {
 
                     $result.Totals[$productInfo.Game] += $shareAmount
                     $result.Games[$productInfo.Game] = $true
+                    $result.MatchedRowCount += 1
                     $result.Rows.Add([pscustomobject]@{
                         Worksheet   = $worksheet.Name
                         RowIndex    = $rowIndex
@@ -466,7 +723,7 @@ function Load-HistoricalInferenceProfiles {
     foreach ($file in $candidateFiles) {
         $workbook = $null
         try {
-            $workbook = $ExcelApp.Workbooks.Open($file.FullName, 0, $true)
+            $workbook = Open-WorkbookSafely -ExcelApp $ExcelApp -Path $file.FullName -Operation 'OpenHistoricalWorkbook'
             $inferenceSheet = $null
             foreach ($worksheet in $workbook.Worksheets) {
                 if ($worksheet.Name -eq (U '\u63A8\u7406\u610F\u89C1')) {
@@ -514,7 +771,11 @@ function Load-HistoricalInferenceProfiles {
             }
         }
         catch {
-            Write-Output ("Skipped historical output reference because it could not be read: {0}" -f $file.FullName)
+            $message = Get-ReadableExceptionDetail -Exception $_.Exception
+            if ([string]::IsNullOrWhiteSpace($message)) {
+                $message = Get-FriendlyExcelOperationMessage -Operation 'OpenHistoricalWorkbook' -Path $file.FullName -Exception $_.Exception
+            }
+            Write-Output ("已跳过历史结果参考文件：{0}" -f $message)
         }
         finally {
             if ($workbook) {
@@ -525,6 +786,23 @@ function Load-HistoricalInferenceProfiles {
     }
 
     return $profiles
+}
+
+function Test-IsRecognizedBusinessDescription {
+    param(
+        [string]$BusinessDesc
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BusinessDesc)) {
+        return $false
+    }
+
+    return (
+        $BusinessDesc.StartsWith($TradeIncomePrefix, [System.StringComparison]::Ordinal) -or
+        $BusinessDesc.StartsWith($RefundPrefix, [System.StringComparison]::Ordinal) -or
+        $BusinessDesc.StartsWith($FeePrefix, [System.StringComparison]::Ordinal) -or
+        $BusinessDesc.StartsWith($BaseFeePrefix, [System.StringComparison]::Ordinal)
+    )
 }
 
 function Save-SummaryWorkbook {
@@ -601,7 +879,7 @@ function Save-SummaryWorkbook {
 
             $inferenceSheet = $workbook.Worksheets.Add([System.Type]::Missing, $workbook.Worksheets.Item($workbook.Worksheets.Count))
             $inferenceSheet.Name = U '\u63A8\u7406\u610F\u89C1'
-            $inferenceSheet.Cells.Item(1, 1).Value2 = U '\u4EE5\u4E0B\u662F\u6839\u636E\u201C\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE\u201D\u95EE\u9898\u81EA\u52A8\u63A8\u7406\u7684\u53C2\u8003\u7ED3\u679C\uFF0C\u539F\u59CB\u7ED3\u679C\u4ECD\u4FDD\u7559\u5728\u201C\u5BF9\u8D26\u6C47\u603B\u201D\u3002'
+            $inferenceSheet.Cells.Item(1, 1).Value2 = U '\u4EE5\u4E0B\u662F\u6839\u636E\u5206\u6210\u660E\u7EC6\u7F3A\u6F0F\u6216\u7F3A\u5C11\u51B2\u56DE\u7B49\u60C5\u51B5\u81EA\u52A8\u63A8\u7406\u7684\u53C2\u8003\u7ED3\u679C\uFF0C\u539F\u59CB\u7ED3\u679C\u4ECD\u4FDD\u7559\u5728\u201C\u5BF9\u8D26\u6C47\u603B\u201D\u3002'
 
             for ($col = 0; $col -lt $inferenceHeaders.Count; $col++) {
                 $inferenceSheet.Cells.Item(2, $col + 1).Value2 = $inferenceHeaders[$col]
@@ -618,7 +896,7 @@ function Save-SummaryWorkbook {
 
                 if ($InferredAdjustmentsByGame.ContainsKey($gameName)) {
                     $adjustmentAmount = [double]$InferredAdjustmentsByGame[$gameName].Amount
-                    $explanation = ('{0}{1}{2}{3}' -f (U '\u5DF2\u81EA\u52A8\u8865\u56DE '), $InferredAdjustmentsByGame[$gameName].Count, (U ' \u7B14\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE'), '')
+                    $explanation = ('{0}{1}{2}' -f (U '\u5DF2\u81EA\u52A8\u63A8\u7406 '), $InferredAdjustmentsByGame[$gameName].Count, (U ' \u7B14\u5206\u6210\u8C03\u6574'))
                 }
 
                 $inferenceSheet.Cells.Item($rowIndex, 1).Value2 = [string]$row['Category']
@@ -646,8 +924,8 @@ function Save-SummaryWorkbook {
             $detailHeaders = @(
                 (U '\u6E38\u620F'),
                 (U '\u8BA2\u5355\u53F7'),
-                (U '\u9000\u6B3E\u91D1\u989D'),
-                (U '\u539F\u59CB\u6B63\u5206\u6210'),
+                (U '\u8BA2\u5355/\u8C03\u6574\u57FA\u51C6\u91D1\u989D'),
+                (U '\u53C2\u8003\u5206\u6210'),
                 (U '\u63A8\u7406\u8C03\u6574:\u5206\u6210'),
                 (U '\u5224\u65AD\u4F9D\u636E'),
                 (U '\u6765\u6E90')
@@ -662,15 +940,15 @@ function Save-SummaryWorkbook {
                 foreach ($entry in $InferenceEntries) {
                     $inferenceSheet.Cells.Item($detailRowIndex, 1).Value2 = [string]$entry.Game
                     $inferenceSheet.Cells.Item($detailRowIndex, 2).Value2 = ("'" + [string]$entry.OrderId)
-                    $inferenceSheet.Cells.Item($detailRowIndex, 3).Value2 = [double]$entry.RefundAmount
-                    $inferenceSheet.Cells.Item($detailRowIndex, 4).Value2 = [double]$entry.OriginalPositiveShare
+                    $inferenceSheet.Cells.Item($detailRowIndex, 3).Value2 = [double]$entry.BasisAmount
+                    $inferenceSheet.Cells.Item($detailRowIndex, 4).Value2 = [double]$entry.ReferenceShare
                     $inferenceSheet.Cells.Item($detailRowIndex, 5).Value2 = [double]$entry.InferredAdjustment
                     $inferenceSheet.Cells.Item($detailRowIndex, 6).Value2 = [string]$entry.Reason
                     $inferenceSheet.Cells.Item($detailRowIndex, 7).Value2 = [string]$entry.Source
                     $detailRowIndex++
                 }
             } else {
-                $inferenceSheet.Cells.Item($detailRowIndex, 1).Value2 = U '\u672C\u6B21\u672A\u53D1\u73B0\u53EF\u81EA\u52A8\u63A8\u7406\u7684\u201C\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE\u201D\u60C5\u51B5\u3002'
+                $inferenceSheet.Cells.Item($detailRowIndex, 1).Value2 = U '\u672C\u6B21\u672A\u53D1\u73B0\u53EF\u81EA\u52A8\u63A8\u7406\u7684\u5206\u6210\u8C03\u6574\u60C5\u51B5\u3002'
                 $detailRowIndex++
             }
 
@@ -736,8 +1014,7 @@ function Save-SummaryWorkbook {
             $diagnosticSheet.Columns.AutoFit() | Out-Null
         }
 
-        $fileFormat = 51
-        $workbook.SaveAs($OutputPath, $fileFormat)
+        Save-WorkbookSafely -Workbook $workbook -OutputPath $OutputPath
     }
     finally {
         $workbook.Close($false) | Out-Null
@@ -756,10 +1033,16 @@ $orderToGame = @{}
 $inputWorkbook = $null
 $excel = $null
 $refundOrders = @{}
+$tradeOrders = @{}
+$serviceFeeTransferAmountsByTime = @{}
+$serviceFeeTransferAmountsByBucket = @{}
+$inputCompatibleWorksheetCount = 0
+$inputRecognizedWorksheetCount = 0
+$inputRecognizedRowCount = 0
 
 try {
-    $resolvedInput = Resolve-UploadPath -Path $InputPath -AllowedExtensions @('.xls', '.xlsx', '.xlsm') -Label 'Input workbook'
-    $resolvedShareStatement = Resolve-UploadPath -Path $ShareStatementPath -AllowedExtensions @('.xls', '.xlsx', '.xlsm') -Label 'Share statement'
+    $resolvedInput = Resolve-UploadPath -Path $InputPath -AllowedExtensions @('.xls', '.xlsx', '.xlsm') -Label '原始支付宝账单'
+    $resolvedShareStatement = Resolve-UploadPath -Path $ShareStatementPath -AllowedExtensions @('.xls', '.xlsx', '.xlsm') -Label '财务分成明细表'
 
     foreach ($resolvedFile in @($resolvedInput, $resolvedShareStatement)) {
         if ($null -ne $resolvedFile -and -not [string]::IsNullOrWhiteSpace($resolvedFile.Notice)) {
@@ -774,35 +1057,35 @@ try {
     $InputPath = $resolvedInput.ResolvedPath
     $ShareStatementPath = if ($null -ne $resolvedShareStatement) { $resolvedShareStatement.ResolvedPath } else { $null }
 
-    $excel = New-Object -ComObject Excel.Application
+    try {
+        $excel = New-Object -ComObject Excel.Application
+    }
+    catch {
+        throw (Get-FriendlyExcelOperationMessage -Operation 'CreateExcelApplication' -Path $null -Exception $_.Exception)
+    }
     $excel.Visible = $false
     $excel.DisplayAlerts = $false
     $excel.ScreenUpdating = $false
     $excel.AskToUpdateLinks = $false
 
-    $shareStatement = Load-ShareStatementSummary -Path $ShareStatementPath -ExcelApp $excel
-    $historicalInferenceProfiles = Load-HistoricalInferenceProfiles -RootPath $HistoricalOutputRoot -CurrentOutputPath $OutputPath -ExcelApp $excel
-    $hasShareStatement = ($shareStatement.Games.Count -gt 0)
-    if ($hasShareStatement) {
-        Write-Output ("Using share statement: {0}" -f $ShareStatementPath)
-    } else {
-        Write-Output "No share statement provided. Share column will stay blank."
-    }
-    if ($historicalInferenceProfiles.Count -gt 0) {
-        Write-Output ("Loaded historical inference references: {0}" -f $historicalInferenceProfiles.Count)
-    }
-
     Ensure-SummaryRow -Summary $summary -Game $OtherCategoryLabel
     Ensure-SummaryRow -Summary $summary -Game $TransferToWangshangLabel
 
-    $inputWorkbook = $excel.Workbooks.Open($InputPath, 0, $true)
+    $inputWorkbook = Open-WorkbookSafely -ExcelApp $excel -Path $InputPath -Operation 'OpenInputWorkbook'
 
     foreach ($worksheet in $inputWorkbook.Worksheets) {
         $usedRange = $worksheet.UsedRange
         try {
             $values = $usedRange.Value2
             $rowCount = $usedRange.Rows.Count
+            $columnCount = $usedRange.Columns.Count
             $startRow = if ($worksheet.Index -eq 1) { 4 } else { 1 }
+
+            if ($columnCount -lt 21) {
+                continue
+            }
+
+            $inputCompatibleWorksheetCount++
 
             for ($rowIndex = $startRow; $rowIndex -le $rowCount; $rowIndex++) {
                 $productName = [string]$values[$rowIndex, 16]
@@ -822,11 +1105,38 @@ try {
         }
     }
 
+    if ($inputCompatibleWorksheetCount -eq 0) {
+        throw (U '\u539F\u59CB\u652F\u4ED8\u5B9D\u8D26\u5355\u683C\u5F0F\u4E0D\u6B63\u786E\uff0C\u672A\u627E\u5230\u7B26\u5408\u652F\u4ED8\u5B9D\u8D26\u52A1\u8868\u7ED3\u6784\u7684\u5DE5\u4F5C\u8868\u3002')
+    }
+
+    $shareStatement = Load-ShareStatementSummary -Path $ShareStatementPath -ExcelApp $excel
+    $historicalInferenceProfiles = Load-HistoricalInferenceProfiles -RootPath $HistoricalOutputRoot -CurrentOutputPath $OutputPath -ExcelApp $excel
+    $hasShareStatement = ($shareStatement.Games.Count -gt 0)
+    if (-not [string]::IsNullOrWhiteSpace($ShareStatementPath)) {
+        if ($shareStatement.MatchedWorksheetCount -eq 0) {
+            throw (U '\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868\u683C\u5F0F\u4E0D\u6B63\u786E\uff0C\u672A\u627E\u5230\u5305\u542B\u201C\u5546\u54C1\u540D\u79F0\u201D\u548C\u201C\u6263\u8D39\u91D1\u989D\u201D\u7684\u5DE5\u4F5C\u8868\u3002')
+        }
+
+        if ($shareStatement.MatchedRowCount -eq 0) {
+            throw (U '\u8D22\u52A1\u5206\u6210\u660E\u7EC6\u8868\u4E2D\u672A\u627E\u5230\u53EF\u7528\u7684\u5206\u6210\u660E\u7EC6\u884C\uff0C\u8BF7\u68C0\u67E5\u4E0A\u4F20\u7684\u6587\u4EF6\u662F\u5426\u6B63\u786E\u3002')
+        }
+    }
+
+    if ($hasShareStatement) {
+        Write-Output ("分成将使用财务分成明细表：{0}" -f $ShareStatementPath)
+    } else {
+        Write-Output "未提供财务分成明细表，分成列将保持空白。"
+    }
+    if ($historicalInferenceProfiles.Count -gt 0) {
+        Write-Output ("已加载历史推理参考：{0} 份" -f $historicalInferenceProfiles.Count)
+    }
+
     foreach ($worksheet in $inputWorkbook.Worksheets) {
         $usedRange = $worksheet.UsedRange
         try {
             $values = $usedRange.Value2
             $rowCount = $usedRange.Rows.Count
+            $columnCount = $usedRange.Columns.Count
             $startRow = if ($worksheet.Index -eq 1) { 4 } else { 1 }
             $unmatchedFeeLogCount = 0
             $unmatchedBaseFeeLogCount = 0
@@ -834,13 +1144,27 @@ try {
             $unmatchedFeeCount = 0
             $unmatchedBaseFeeTotal = 0.0
             $unmatchedBaseFeeCount = 0
+            $worksheetRecognizedRowCount = 0
+
+            if ($columnCount -lt 21) {
+                continue
+            }
 
             for ($rowIndex = $startRow; $rowIndex -le $rowCount; $rowIndex++) {
+                $entryTime = [string]$values[$rowIndex, 2]
                 $businessDesc = [string]$values[$rowIndex, 21]
                 $productName = [string]$values[$rowIndex, 16]
                 $baseOrderId = [string]$values[$rowIndex, 18]
                 $remark = [string]$values[$rowIndex, 17]
                 $account = [string]$values[$rowIndex, 13]
+                $remarkOrderId = Get-OrderIdFromRemark -Remark $remark
+                $serviceFeeHourBucket = Get-ServiceFeeHourBucketFromRemark -Remark $remark
+                $entryHourBucket = Get-TimeHourBucket -Text $entryTime
+                if ([string]::IsNullOrWhiteSpace($baseOrderId) -and -not [string]::IsNullOrWhiteSpace($remarkOrderId)) {
+                    $baseOrderId = $remarkOrderId
+                }
+                $isRemarkDerivedFee = Test-IsRemarkDerivedFee -BusinessDesc $businessDesc -Remark $remark -RemarkOrderId $remarkOrderId
+                $isRemarkDerivedBaseFee = Test-IsRemarkDerivedBaseFee -BusinessDesc $businessDesc -Remark $remark
 
                 $game = $null
                 $productInfo = $null
@@ -858,6 +1182,20 @@ try {
                 $income = Get-NumericValue $values[$rowIndex, 7]
                 $expense = Get-NumericValue $values[$rowIndex, 8]
                 $hasAmount = ($income -ne 0.0 -or $expense -ne 0.0)
+
+                if ($account -eq 'tbly@service.aliyun.com' -and $hasAmount) {
+                    Add-BucketAmount -BucketAmounts $serviceFeeTransferAmountsByTime -Bucket $entryTime.Trim() -Amount ($expense - $income)
+                    Add-BucketAmount -BucketAmounts $serviceFeeTransferAmountsByBucket -Bucket $serviceFeeHourBucket -Amount ($expense - $income)
+                }
+
+                if ((Test-IsRecognizedBusinessDescription -BusinessDesc $businessDesc) -or
+                    $isRemarkDerivedFee -or
+                    $isRemarkDerivedBaseFee -or
+                    (-not [string]::IsNullOrWhiteSpace($remark) -and $remark.Contains($TransferToWangshangKeyword)) -or
+                    ($account -eq 'tbly@service.aliyun.com' -and $hasAmount)) {
+                    $worksheetRecognizedRowCount++
+                    $inputRecognizedRowCount++
+                }
 
                 if (-not [string]::IsNullOrWhiteSpace($remark) -and $remark.Contains($TransferToWangshangKeyword)) {
                     $summary[$TransferToWangshangLabel].Income += $income
@@ -877,6 +1215,17 @@ try {
                     }
 
                     $summary[$game].Income += $income
+                    if (-not [string]::IsNullOrWhiteSpace($baseOrderId)) {
+                        $tradeOrders[$baseOrderId] = [pscustomobject]@{
+                            OrderId      = $baseOrderId
+                            Game         = $game
+                            Amount       = $income
+                            ProductPrice = if ($null -ne $productInfo) { $productInfo.Price } else { $null }
+                            EntryTime    = $entryTime.Trim()
+                            HourBucket   = $entryHourBucket
+                            Source       = ("{0}#{1}" -f $worksheet.Name, $rowIndex)
+                        }
+                    }
                     continue
                 }
 
@@ -900,7 +1249,10 @@ try {
                     continue
                 }
 
-                $isFee = -not [string]::IsNullOrWhiteSpace($businessDesc) -and $businessDesc.StartsWith($FeePrefix, [System.StringComparison]::Ordinal)
+                $isFee = (
+                    (-not [string]::IsNullOrWhiteSpace($businessDesc) -and $businessDesc.StartsWith($FeePrefix, [System.StringComparison]::Ordinal)) -or
+                    $isRemarkDerivedFee
+                )
                 if ($isFee) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].Fee += ($expense - $income)
@@ -917,7 +1269,10 @@ try {
                     continue
                 }
 
-                $isBaseFee = -not [string]::IsNullOrWhiteSpace($businessDesc) -and $businessDesc.StartsWith($BaseFeePrefix, [System.StringComparison]::Ordinal)
+                $isBaseFee = (
+                    (-not [string]::IsNullOrWhiteSpace($businessDesc) -and $businessDesc.StartsWith($BaseFeePrefix, [System.StringComparison]::Ordinal)) -or
+                    $isRemarkDerivedBaseFee
+                )
                 if ($isBaseFee) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].BaseFee += $expense
@@ -951,10 +1306,18 @@ try {
             if ($unmatchedBaseFeeCount -gt 0) {
                 Write-Output ("Unmatched base fee summary for {0}: rows={1}, total={2}" -f $worksheet.Name, $unmatchedBaseFeeCount, $unmatchedBaseFeeTotal.ToString('0.00'))
             }
+
+            if ($worksheetRecognizedRowCount -gt 0) {
+                $inputRecognizedWorksheetCount++
+            }
         }
         finally {
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($usedRange) | Out-Null
         }
+    }
+
+    if ($inputRecognizedWorksheetCount -eq 0 -or $inputRecognizedRowCount -eq 0) {
+        throw (U '\u539F\u59CB\u652F\u4ED8\u5B9D\u8D26\u5355\u683C\u5F0F\u4E0D\u6B63\u786E\uff0C\u672A\u627E\u5230\u53EF\u8BC6\u522B\u7684\u8D26\u52A1\u6D41\u6C34\u3002\u8BF7\u68C0\u67E5\u662F\u5426\u4E0A\u4F20\u4E86\u6B63\u786E\u7684\u8D26\u52A1\u8868\u3002')
     }
 
     if ($hasShareStatement) {
@@ -1054,13 +1417,13 @@ try {
                 $inferredAdjustmentsByGame[$refundOrder.Game].Count += 1
 
                 $inferenceEntries.Add([pscustomobject]@{
-                    Game                = $refundOrder.Game
-                    OrderId             = $refundOrder.OrderId
-                    RefundAmount        = [double]$refundOrder.Amount
-                    OriginalPositiveShare = [double]$inferredShareBase
-                    InferredAdjustment  = [double]$inferredAdjustment
-                    Reason              = $reason
-                    Source              = $refundOrder.Source
+                    Game               = $refundOrder.Game
+                    OrderId            = $refundOrder.OrderId
+                    BasisAmount        = [double]$refundOrder.Amount
+                    ReferenceShare     = [double]$inferredShareBase
+                    InferredAdjustment = [double]$inferredAdjustment
+                    Reason             = $reason
+                    Source             = $refundOrder.Source
                 }) | Out-Null
 
                 Add-Diagnostic -Diagnostics $diagnostics -Type (U '\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE') -Status (U '\u5DF2\u63A8\u7406') -Game $refundOrder.Game -OrderId $refundOrder.OrderId -Amount $inferredAdjustment -Source $refundOrder.Source -Message $reason
@@ -1070,6 +1433,120 @@ try {
 
             Add-Diagnostic -Diagnostics $diagnostics -Type (U '\u9000\u6B3E\u7F3A\u5C11\u8D1F\u5206\u6210\u51B2\u56DE') -Status (U '\u5F85\u590D\u6838') -Game $refundOrder.Game -OrderId $refundOrder.OrderId -Amount $refundOrder.Amount -Source $refundOrder.Source -Message (U '\u8BE5\u9000\u6B3E\u5355\u5728\u5206\u6210\u660E\u7EC6\u8868\u4E2D\u672A\u627E\u5230\u540C\u8BA2\u5355\u7684\u8D1F\u5206\u6210\u51B2\u56DE\uff0c\u6682\u65E0\u6CD5\u81EA\u52A8\u63A8\u7406\uff0c\u8BF7\u5728\u5BFC\u51FA\u7ED3\u679C\u4E2D\u590D\u6838')
             Write-Output ("Refund is missing negative share reversal: order={0}, game={1}, amount={2}" -f $refundOrder.OrderId, $refundOrder.Game, $refundOrder.Amount.ToString('0.00'))
+        }
+
+        foreach ($tradeOrder in $tradeOrders.Values) {
+            $hasPositiveShare = $shareStatement.PositiveAmountsByOrder.ContainsKey($tradeOrder.OrderId)
+            $canInfer = $false
+            $reason = $null
+            $inferredShareBase = 0.0
+            $candidateAmounts = New-Object 'System.Collections.Generic.List[double]'
+
+            if ($hasPositiveShare) {
+                continue
+            }
+
+            if ($null -ne $tradeOrder.ProductPrice) {
+                $gamePriceKey = ('{0}|{1:F2}' -f $tradeOrder.Game, [double]$tradeOrder.ProductPrice)
+                if ($shareStatement.PositiveAmountsByGamePrice.ContainsKey($gamePriceKey)) {
+                    $priceProfile = $shareStatement.PositiveAmountsByGamePrice[$gamePriceKey]
+                    foreach ($value in $priceProfile.Amounts.Values) {
+                        if (-not $candidateAmounts.Contains([double]$value)) {
+                            [void]$candidateAmounts.Add([double]$value)
+                        }
+                    }
+                    if ($candidateAmounts.Count -eq 1) {
+                        $canInfer = $true
+                        $inferredShareBase = [double]$candidateAmounts[0]
+                        $reason = ('{0}{1}{2}{3}{4}' -f (U '\u5206\u6210\u660E\u7EC6\u8868\u4E2D\u201C'), $tradeOrder.Game, $tradeOrder.ProductPrice.ToString('0.##'), (U '\u5143\u793C\u5305\u201D\u51FA\u73B0\u4E86\u7A33\u5B9A\u5206\u6210 '), $inferredShareBase.ToString('0.00'))
+                        $reason += ('{0}{1}{2}' -f (U '\uFF08\u6837\u672C '), $priceProfile.Count, (U ' \u7B14\uFF09\uFF0C\u672C\u7B14\u6B63\u5206\u6210\u7F3A\u5931\uff0c\u5DF2\u6309\u540C\u6E38\u620F\u540C\u91D1\u989D\u6863\u4F4D\u81EA\u52A8\u8865\u5165'))
+                    }
+                }
+            }
+
+            if (-not $canInfer -and $null -ne $tradeOrder.ProductPrice) {
+                $gamePriceKey = ('{0}|{1:F2}' -f $tradeOrder.Game, [double]$tradeOrder.ProductPrice)
+                if ($historicalInferenceProfiles.ContainsKey($gamePriceKey)) {
+                    $historyProfile = $historicalInferenceProfiles[$gamePriceKey]
+                    $historicalCandidateAmounts = @($historyProfile.Amounts.Values)
+                    if ($candidateAmounts.Count -eq 0 -and $historicalCandidateAmounts.Count -eq 1) {
+                        $canInfer = $true
+                        $inferredShareBase = [double]$historicalCandidateAmounts[0]
+                        $reason = ('{0}{1}{2}{3}{4}' -f (U '\u5DF2\u53C2\u8003\u5386\u53F2\u8F93\u51FA\u7ED3\u679C\u4E2D\u201C'), $tradeOrder.Game, $tradeOrder.ProductPrice.ToString('0.##'), (U '\u5143\u793C\u5305\u201D\u7684\u7A33\u5B9A\u63A8\u7406\u5206\u6210 '), $inferredShareBase.ToString('0.00'))
+                        $reason += ('{0}{1}{2}' -f (U '\uFF08\u5386\u53F2\u6837\u672C '), $historyProfile.Count, (U ' \u7B14\uFF09\uFF0C\u672C\u7B14\u6B63\u5206\u6210\u7F3A\u5931\uff0c\u5DF2\u6309\u5386\u53F2\u53C2\u8003\u81EA\u52A8\u8865\u5165'))
+                    }
+                }
+            }
+
+            if (-not $canInfer -and $candidateAmounts.Count -gt 1 -and -not [string]::IsNullOrWhiteSpace($tradeOrder.HourBucket) -and $serviceFeeTransferAmountsByBucket.ContainsKey($tradeOrder.HourBucket)) {
+                if (-not [string]::IsNullOrWhiteSpace($tradeOrder.EntryTime) -and $serviceFeeTransferAmountsByTime.ContainsKey($tradeOrder.EntryTime)) {
+                    $matchedCandidates = New-Object 'System.Collections.Generic.List[double]'
+                    foreach ($candidateAmount in $candidateAmounts) {
+                        $candidateKey = ('{0:F2}' -f [double]$candidateAmount)
+                        if ($serviceFeeTransferAmountsByTime[$tradeOrder.EntryTime].ContainsKey($candidateKey)) {
+                            [void]$matchedCandidates.Add([double]$candidateAmount)
+                        }
+                    }
+
+                    if ($matchedCandidates.Count -eq 1) {
+                        $canInfer = $true
+                        $inferredShareBase = [double]$matchedCandidates[0]
+                        $reason = ('{0}{1}{2}' -f (U '\u540C\u6E38\u620F\u540C\u4EF7\u4F4D\u5B58\u5728\u591A\u79CD\u5206\u6210\u6863\u4F4D\uff0C\u4F46\u5728 '), $tradeOrder.EntryTime, (U ' \u8FD9\u4E2A\u51C6\u786E\u65F6\u70B9\u7684\u539F\u59CB\u8D26\u5355\u4E2D\u51FA\u73B0\u4E86\u552F\u4E00\u5339\u914D\u7684\u4E92\u52A8\u5F00\u653E\u865A\u62DF\u4E1A\u52A1\u8F6F\u4EF6\u670D\u52A1\u8D39\u91D1\u989D '))
+                        $reason += $inferredShareBase.ToString('0.00')
+                        $reason += (U '\uFF0C\u5DF2\u6309\u540C\u65F6\u70B9\u670D\u52A1\u8D39\u8BB0\u5F55\u81EA\u52A8\u8865\u5165\u8FD9\u7B14\u6B63\u5206\u6210')
+                    }
+                }
+            }
+
+            if (-not $canInfer -and $candidateAmounts.Count -gt 1 -and -not [string]::IsNullOrWhiteSpace($tradeOrder.HourBucket) -and $serviceFeeTransferAmountsByBucket.ContainsKey($tradeOrder.HourBucket)) {
+                $matchedCandidates = New-Object 'System.Collections.Generic.List[double]'
+                foreach ($candidateAmount in $candidateAmounts) {
+                    $candidateKey = ('{0:F2}' -f [double]$candidateAmount)
+                    if ($serviceFeeTransferAmountsByBucket[$tradeOrder.HourBucket].ContainsKey($candidateKey)) {
+                        [void]$matchedCandidates.Add([double]$candidateAmount)
+                    }
+                }
+
+                if ($matchedCandidates.Count -eq 1) {
+                    $canInfer = $true
+                    $inferredShareBase = [double]$matchedCandidates[0]
+                    $reason = ('{0}{1}{2}' -f (U '\u540C\u6E38\u620F\u540C\u4EF7\u4F4D\u5B58\u5728\u591A\u79CD\u5206\u6210\u6863\u4F4D\uff0C\u4F46\u5728 '), $tradeOrder.HourBucket, (U ' \u8FD9\u4E2A\u5C0F\u65F6\u6863\u4F4D\u7684\u539F\u59CB\u8D26\u5355\u4E2D\u51FA\u73B0\u4E86\u552F\u4E00\u5339\u914D\u7684\u4E92\u52A8\u5F00\u653E\u865A\u62DF\u4E1A\u52A1\u8F6F\u4EF6\u670D\u52A1\u8D39\u91D1\u989D '))
+                    $reason += $inferredShareBase.ToString('0.00')
+                    $reason += (U '\uFF0C\u5DF2\u6309\u540C\u5C0F\u65F6\u670D\u52A1\u8D39\u8BB0\u5F55\u81EA\u52A8\u8865\u5165\u8FD9\u7B14\u6B63\u5206\u6210')
+                }
+            }
+
+            if ($canInfer) {
+                $inferredAdjustment = [double]$inferredShareBase
+                Add-ShareAmount -Summary $inferredSummary -Game $tradeOrder.Game -Amount $inferredAdjustment
+
+                if (-not $inferredAdjustmentsByGame.ContainsKey($tradeOrder.Game)) {
+                    $inferredAdjustmentsByGame[$tradeOrder.Game] = [ordered]@{
+                        Amount = 0.0
+                        Count  = 0
+                    }
+                }
+
+                $inferredAdjustmentsByGame[$tradeOrder.Game].Amount += $inferredAdjustment
+                $inferredAdjustmentsByGame[$tradeOrder.Game].Count += 1
+
+                $inferenceEntries.Add([pscustomobject]@{
+                    Game               = $tradeOrder.Game
+                    OrderId            = $tradeOrder.OrderId
+                    BasisAmount        = [double]$tradeOrder.Amount
+                    ReferenceShare     = [double]$inferredShareBase
+                    InferredAdjustment = [double]$inferredAdjustment
+                    Reason             = $reason
+                    Source             = $tradeOrder.Source
+                }) | Out-Null
+
+                Add-Diagnostic -Diagnostics $diagnostics -Type (U '\u6536\u5165\u7F3A\u5C11\u6B63\u5206\u6210') -Status (U '\u5DF2\u63A8\u7406') -Game $tradeOrder.Game -OrderId $tradeOrder.OrderId -Amount $inferredAdjustment -Source $tradeOrder.Source -Message $reason
+                Write-Output ("Inferred missing positive share: order={0}, game={1}, inferredAdjustment={2}" -f $tradeOrder.OrderId, $tradeOrder.Game, $inferredAdjustment.ToString('0.00'))
+                continue
+            }
+
+            Add-Diagnostic -Diagnostics $diagnostics -Type (U '\u6536\u5165\u7F3A\u5C11\u6B63\u5206\u6210') -Status (U '\u5F85\u590D\u6838') -Game $tradeOrder.Game -OrderId $tradeOrder.OrderId -Amount $tradeOrder.Amount -Source $tradeOrder.Source -Message (U '\u8BE5\u6536\u5165\u5355\u5728\u5206\u6210\u660E\u7EC6\u8868\u4E2D\u672A\u627E\u5230\u540C\u8BA2\u5355\u7684\u6B63\u5206\u6210\uff0c\u6682\u65E0\u6CD5\u81EA\u52A8\u63A8\u7406\uff0c\u8BF7\u5728\u5BFC\u51FA\u7ED3\u679C\u4E2D\u590D\u6838')
+            Write-Output ("Trade is missing positive share: order={0}, game={1}, amount={2}" -f $tradeOrder.OrderId, $tradeOrder.Game, $tradeOrder.Amount.ToString('0.00'))
         }
     }
 
@@ -1095,4 +1572,4 @@ finally {
     }
 }
 
-Write-Output ("Generated reconciliation workbook: {0}" -f $OutputPath)
+Write-Output ("已生成对账结果：{0}" -f $OutputPath)
