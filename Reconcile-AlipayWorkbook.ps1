@@ -644,6 +644,41 @@ function Add-Diagnostic {
     }) | Out-Null
 }
 
+function Add-OtherSourceEntry {
+    param(
+        $Entries,
+        [string]$SourceType,
+        [string]$Worksheet,
+        [int]$RowIndex,
+        [string]$EntryTime,
+        [string]$Account,
+        [string]$ProductName,
+        [string]$Remark,
+        [string]$OrderId,
+        [string]$BusinessDesc,
+        $Income,
+        $Expense,
+        $ShareAmount,
+        [string]$Reason
+    )
+
+    $Entries.Add([pscustomobject]@{
+        SourceType   = $SourceType
+        Worksheet    = $Worksheet
+        RowIndex     = $RowIndex
+        EntryTime    = $EntryTime
+        Account      = $Account
+        ProductName  = $ProductName
+        Remark       = $Remark
+        OrderId      = $OrderId
+        BusinessDesc = $BusinessDesc
+        Income       = $Income
+        Expense      = $Expense
+        ShareAmount  = $ShareAmount
+        Reason       = $Reason
+    }) | Out-Null
+}
+
 function Copy-Summary {
     param(
         [hashtable]$Summary
@@ -811,6 +846,7 @@ function Save-SummaryWorkbook {
         [hashtable]$InferredSummary,
         [hashtable]$InferredAdjustmentsByGame,
         $InferenceEntries,
+        $OtherSourceEntries,
         [string]$OutputPath,
         $Diagnostics,
         $ExcelApp
@@ -1014,6 +1050,80 @@ function Save-SummaryWorkbook {
             $diagnosticSheet.Columns.AutoFit() | Out-Null
         }
 
+        if ($null -ne $OtherSourceEntries) {
+            $otherSheet = $workbook.Worksheets.Add([System.Type]::Missing, $workbook.Worksheets.Item($workbook.Worksheets.Count))
+            $otherSheet.Name = U '\u5176\u4ED6\u660E\u7EC6'
+
+            $otherHeaders = @(
+                (U '\u6765\u6E90\u7C7B\u578B'),
+                (U '\u5DE5\u4F5C\u8868'),
+                (U '\u884C\u53F7'),
+                (U '\u8BB0\u8D26\u65F6\u95F4'),
+                (U '\u5BF9\u65B9\u8D26\u6237'),
+                (U '\u5546\u54C1\u540D\u79F0'),
+                (U '\u5907\u6CE8'),
+                (U '\u8BA2\u5355\u53F7'),
+                (U '\u4E1A\u52A1\u63CF\u8FF0'),
+                (U '\u6536\u5165\uff08+\u5143\uff09'),
+                (U '\u652F\u51FA\uff08-\u5143\uff09'),
+                (U '\u5206\u6210'),
+                (U '\u5F52\u5165\u5176\u4ED6\u539F\u56E0')
+            )
+
+            for ($col = 0; $col -lt $otherHeaders.Count; $col++) {
+                $otherSheet.Cells.Item(1, $col + 1).Value2 = $otherHeaders[$col]
+            }
+
+            $otherRowIndex = 2
+            if ($OtherSourceEntries.Count -gt 0) {
+                foreach ($entry in $OtherSourceEntries) {
+                    $otherSheet.Cells.Item($otherRowIndex, 1).Value2 = [string]$entry.SourceType
+                    $otherSheet.Cells.Item($otherRowIndex, 2).Value2 = [string]$entry.Worksheet
+                    if ($entry.RowIndex -gt 0) {
+                        $otherSheet.Cells.Item($otherRowIndex, 3).Value2 = [int]$entry.RowIndex
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.EntryTime)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 4).Value2 = [string]$entry.EntryTime
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.Account)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 5).Value2 = [string]$entry.Account
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.ProductName)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 6).Value2 = [string]$entry.ProductName
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.Remark)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 7).Value2 = [string]$entry.Remark
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.OrderId)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 8).Value2 = ("'" + [string]$entry.OrderId)
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.BusinessDesc)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 9).Value2 = [string]$entry.BusinessDesc
+                    }
+                    if ($null -ne $entry.Income) {
+                        $otherSheet.Cells.Item($otherRowIndex, 10).Value2 = [double]$entry.Income
+                    }
+                    if ($null -ne $entry.Expense) {
+                        $otherSheet.Cells.Item($otherRowIndex, 11).Value2 = [double]$entry.Expense
+                    }
+                    if ($null -ne $entry.ShareAmount) {
+                        $otherSheet.Cells.Item($otherRowIndex, 12).Value2 = [double]$entry.ShareAmount
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$entry.Reason)) {
+                        $otherSheet.Cells.Item($otherRowIndex, 13).Value2 = [string]$entry.Reason
+                    }
+                    $otherRowIndex++
+                }
+            } else {
+                $otherSheet.Cells.Item($otherRowIndex, 1).Value2 = U '\u672C\u6B21\u6CA1\u6709\u5F52\u5165\u201C\u5176\u4ED6\u201D\u7684\u6E90\u6570\u636E\u3002'
+            }
+
+            $otherSheet.Range("A1:M1").Font.Bold = $true
+            $otherSheet.Range("H:H").NumberFormat = "@"
+            $otherSheet.Range("J:L").NumberFormat = "0.00"
+            $otherSheet.Columns.AutoFit() | Out-Null
+        }
+
         Save-WorkbookSafely -Workbook $workbook -OutputPath $OutputPath
     }
     finally {
@@ -1029,6 +1139,7 @@ $inferredAdjustmentsByGame = @{}
 $historicalInferenceProfiles = @{}
 $diagnostics = New-Object 'System.Collections.Generic.List[object]'
 $inferenceEntries = New-Object 'System.Collections.Generic.List[object]'
+$otherSourceEntries = New-Object 'System.Collections.Generic.List[object]'
 $orderToGame = @{}
 $inputWorkbook = $null
 $excel = $null
@@ -1211,6 +1322,7 @@ try {
                 if ($isTradeIncome) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].Income += $income
+                        Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u539F\u59CB\u8D26\u52A1\u8868') -Worksheet $worksheet.Name -RowIndex $rowIndex -EntryTime $entryTime -Account $account -ProductName $productName -Remark $remark -OrderId $baseOrderId -BusinessDesc $businessDesc -Income $income -Expense $expense -ShareAmount $null -Reason (U '\u4EA4\u6613\u6536\u5165\u65E0\u6CD5\u5206\u914D\u5230\u6E38\u620F')
                         continue
                     }
 
@@ -1233,6 +1345,7 @@ try {
                 if ($isRefund) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].Expense += $expense
+                        Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u539F\u59CB\u8D26\u52A1\u8868') -Worksheet $worksheet.Name -RowIndex $rowIndex -EntryTime $entryTime -Account $account -ProductName $productName -Remark $remark -OrderId $baseOrderId -BusinessDesc $businessDesc -Income $income -Expense $expense -ShareAmount $null -Reason (U '\u9000\u6B3E\u65E0\u6CD5\u5206\u914D\u5230\u6E38\u620F')
                         continue
                     }
 
@@ -1256,6 +1369,7 @@ try {
                 if ($isFee) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].Fee += ($expense - $income)
+                        Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u539F\u59CB\u8D26\u52A1\u8868') -Worksheet $worksheet.Name -RowIndex $rowIndex -EntryTime $entryTime -Account $account -ProductName $productName -Remark $remark -OrderId $baseOrderId -BusinessDesc $businessDesc -Income $income -Expense $expense -ShareAmount $null -Reason (U '\u624B\u7EED\u8D39\u65E0\u6CD5\u5206\u914D\u5230\u6E38\u620F')
                         $unmatchedFeeCount++
                         $unmatchedFeeTotal += ($expense - $income)
                         if ($unmatchedFeeLogCount -lt 10) {
@@ -1276,6 +1390,7 @@ try {
                 if ($isBaseFee) {
                     if ([string]::IsNullOrWhiteSpace($game)) {
                         $summary[$OtherCategoryLabel].BaseFee += $expense
+                        Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u539F\u59CB\u8D26\u52A1\u8868') -Worksheet $worksheet.Name -RowIndex $rowIndex -EntryTime $entryTime -Account $account -ProductName $productName -Remark $remark -OrderId $baseOrderId -BusinessDesc $businessDesc -Income $income -Expense $expense -ShareAmount $null -Reason (U '\u57FA\u7840\u8F6F\u4EF6\u8D39\u65E0\u6CD5\u5206\u914D\u5230\u6E38\u620F')
                         $unmatchedBaseFeeCount++
                         $unmatchedBaseFeeTotal += $expense
                         if ($unmatchedBaseFeeLogCount -lt 10) {
@@ -1296,6 +1411,7 @@ try {
                 if ($hasAmount) {
                     $summary[$OtherCategoryLabel].Income += $income
                     $summary[$OtherCategoryLabel].Expense += $expense
+                    Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u539F\u59CB\u8D26\u52A1\u8868') -Worksheet $worksheet.Name -RowIndex $rowIndex -EntryTime $entryTime -Account $account -ProductName $productName -Remark $remark -OrderId $baseOrderId -BusinessDesc $businessDesc -Income $income -Expense $expense -ShareAmount $null -Reason (U '\u6709\u91D1\u989D\u4F46\u65E0\u6CD5\u5F52\u7C7B\u5230\u5176\u4ED6\u6E38\u620F\u53E3\u5F84')
                 }
             }
 
@@ -1335,6 +1451,7 @@ try {
                 $game = $OtherCategoryLabel
                 $unmatchedShareCount++
                 $unmatchedShareTotal += $shareRow.Amount
+                Add-OtherSourceEntry -Entries $otherSourceEntries -SourceType (U '\u5206\u6210\u660E\u7EC6\u8868') -Worksheet $shareRow.Worksheet -RowIndex $shareRow.RowIndex -EntryTime $null -Account $null -ProductName $shareRow.ProductName -Remark $null -OrderId $shareRow.OrderId -BusinessDesc $null -Income $null -Expense $null -ShareAmount $shareRow.Amount -Reason (U '\u5206\u6210\u884C\u65E0\u6CD5\u5206\u914D\u5230\u6E38\u620F')
                 if ($unmatchedShareLogCount -lt 10) {
                     Write-Output ("Unmatched share row in {0} row {1}: order={2}, product={3}, amount={4}" -f $shareRow.Worksheet, $shareRow.RowIndex, $shareRow.OrderId, $shareRow.ProductName, $shareRow.Amount.ToString('0.00'))
                     $unmatchedShareLogCount++
@@ -1571,7 +1688,7 @@ try {
         }
     }
 
-    Save-SummaryWorkbook -Summary $summary -InferredSummary $inferredSummary -InferredAdjustmentsByGame $inferredAdjustmentsByGame -InferenceEntries $inferenceEntries -OutputPath $OutputPath -Diagnostics $diagnostics -ExcelApp $excel
+    Save-SummaryWorkbook -Summary $summary -InferredSummary $inferredSummary -InferredAdjustmentsByGame $inferredAdjustmentsByGame -InferenceEntries $inferenceEntries -OtherSourceEntries $otherSourceEntries -OutputPath $OutputPath -Diagnostics $diagnostics -ExcelApp $excel
 }
 finally {
     if ($inputWorkbook) {
